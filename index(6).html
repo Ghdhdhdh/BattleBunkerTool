@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Battlesnake Map Editor</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    #editorContainer { position: relative; margin-top: 20px; }
+    #gridContainer { display: grid; grid-gap: 1px; background: #333; }
+    .cell { width: 30px; height: 30px; background: #fff; position: relative; z-index: 1;
+            display: flex; align-items: center; justify-content: center; }
+    .cell.selected { outline: 3px solid yellow; }
+    #overlay { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; }
+    #toolbar { margin-top: 20px; }
+    .tool-button { margin-right: 8px; padding: 6px 12px; border: 1px solid #ccc; background: #eee; cursor: pointer; }
+    .tool-button.active { background: #ddd; }
+    #historyControls { margin-top: 10px; }
+    #exportData, #importData { width: 100%; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <h1>Battlesnake Map Editor</h1>
+  <div>
+    <label>Width: <input id="width" type="number" min="2" value="11"></label>
+    <label>Height: <input id="height" type="number" min="2" value="11"></label>
+    <button id="createBoard">Create Board</button>
+  </div>
+  <div id="toolbar">
+    <span>Place Snake A–L:</span>
+    <span id="snakeButtons"></span>
+    <button class="tool-button" id="foodButton" data-type="food">🍎 Food</button>
+    <button class="tool-button" id="eraseButton" data-type="erase">🧹 Eraser</button>
+    <button class="tool-button" id="moveTool" data-type="plan">▶️ Plan Moves</button>
+    <button class="tool-button" id="tickBtn" data-type="tick">✅ Tick</button>
+  </div>
+  <div id="historyControls">
+    <input type="range" id="historySlider" min="0" max="0" value="0" />
+    <span id="sliderLabel">Turn: 0</span>
+  </div>
+  <div id="editorContainer">
+    <div id="gridContainer"></div>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div style="margin-top:20px;">
+    <button id="exportBtn">Export JSON</button>
+    <textarea id="exportData" rows="5" readonly></textarea>
+  </div>
+  <div style="margin-top:20px;">
+    <textarea id="importData" rows="5" placeholder="Paste JSON here"></textarea><br/>
+    <button id="importBtn">Import JSON</button>
+  </div>
+  <script>
+    let width, height;
+    let snakes = [], foods = [], history = [], snapshots = [];
+    let viewTurn = 0, selectedTool = null;
+    const cellSize = 30;
+    const snakeColors = ['#4caf50','#2196f3','#ff9800','#9c27b0','#795548','#009688','#e91e63','#00bcd4','#ff5722','#607d8b','#cddc39','#3f51b5'];
+    const snakeLetters = 'ABCDEFGHIJKL'.split('');
+
+    const gridContainer = document.getElementById('gridContainer');
+    const overlay = document.getElementById('overlay');
+    const historySlider = document.getElementById('historySlider');
+    const sliderLabel = document.getElementById('sliderLabel');
+
+    // Toolbar setup
+    const snakeButtonsContainer = document.getElementById('snakeButtons');
+    snakeLetters.forEach(key => {
+      const btn = document.createElement('button');
+      btn.textContent = key; btn.className='tool-button';
+      btn.dataset.type='snake'; btn.dataset.key=key;
+      btn.addEventListener('click', _=>selectTool({type:'snake',key}));
+      snakeButtonsContainer.appendChild(btn);
+    });
+    document.getElementById('foodButton').addEventListener('click', _=>selectTool({type:'food'}));
+    document.getElementById('eraseButton').addEventListener('click', _=>selectTool({type:'erase'}));
+    document.getElementById('moveTool').addEventListener('click', _=>selectTool({type:'plan'}));
+    document.getElementById('tickBtn').addEventListener('click', applyMoves);
+
+    historySlider.addEventListener('input', ()=>{
+      viewTurn = +historySlider.value;
+      sliderLabel.textContent = `Turn: ${viewTurn}`;
+      render();
+    });
+
+    document.getElementById('createBoard').addEventListener('click', ()=>createBoard(false));
+    document.getElementById('exportBtn').addEventListener('click', ()=>{
+      const data={width,height,snakes:snakes.map(s=>({body:s.body,key:s.key,color:s.color})),foods,history};
+      document.getElementById('exportData').value = JSON.stringify(data,null,2);
+    });
+    document.getElementById('importBtn').addEventListener('click', ()=>{
+      try{
+        const data=JSON.parse(document.getElementById('importData').value);
+        width=data.width; height=data.height;
+        snakes=data.snakes.map((sn,i)=>({id:i,body:sn.body,color:sn.color,key:sn.key}));
+        foods=data.foods||[]; history=data.history||[];
+        snapshots=[]; rebuildSnapshots();
+        viewTurn=history.length;
+        historySlider.max=history.length;
+        historySlider.value=viewTurn;
+        sliderLabel.textContent=`Turn: ${viewTurn}`;
+        document.getElementById('width').value=width;
+        document.getElementById('height').value=height;
+        selectTool({type:'plan'});
+        createBoard(true);
+      }catch{alert('Invalid JSON');}
+    });
+
+    function selectTool(tool){selectedTool=tool;updateToolbar();}
+    function updateToolbar(){
+      document.querySelectorAll('.tool-button').forEach(btn=>{
+        const type=btn.dataset.type; const key=btn.dataset.key;
+        btn.classList.toggle('active',selectedTool&&selectedTool.type===type&&(!key||selectedTool.key===key));
+      });
+    }
+
+    function createBoard(fromImport){
+      width=+document.getElementById('width').value;height=+document.getElementById('height').value;
+      if(!fromImport){snakes=[];foods=[];history=[];snapshots=[];viewTurn=0;historySlider.max=0;historySlider.value=0;sliderLabel.textContent='Turn: 0';selectTool({type:'plan'});}
+      gridContainer.style.gridTemplateColumns=`repeat(${width},${cellSize}px)`;
+      gridContainer.innerHTML='';
+      for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+        const cell=document.createElement('div');cell.className='cell';cell.dataset.x=x;cell.dataset.y=y;
+        cell.addEventListener('click',onCellClick);
+        gridContainer.appendChild(cell);
+      }
+      const W=width*cellSize+(width-1),H=height*cellSize+(height-1);
+      overlay.width=W;overlay.height=H;overlay.style.width=W+'px';overlay.style.height=H+'px';
+      gridContainer.style.width=W+'px';gridContainer.style.height=H+'px';
+      snapshots=[snapshotState()]; render();
+    }
+
+    function snapshotState(){
+      return{
+        snakes:snakes.map(s=>({body:s.body.map(b=>({x:b.x,y:b.y})),key:s.key,color:s.color})),
+        foods:foods.map(f=>({x:f.x,y:f.y}))
+      };
+    }
+
+    function rebuildSnapshots(){
+      snapshots=[snapshotState()];
+      // replay moves
+      const origSnakes = snakes.map(s=>({key:s.key,color:s.color}));
+      const origFoods = foods.map(f=>({x:f.x,y:f.y}));
+      // reset snakes and foods
+      snakes = origSnakes.map((s,i)=>({id:i,body:[...snapshots[0].snakes[i].body],color:s.color,key:s.key}));
+      foods=[...snapshots[0].foods];
+      history.forEach(turn=>{
+        // apply turn moves
+        turn.forEach(m=>{
+          const s=snakes.find(s=>s.key===m.key);
+          s.body.unshift({x:m.x,y:m.y});
+          const fi=foods.findIndex(f=>f.x===m.x&&f.y===m.y);
+          if(fi>=0)foods.splice(fi,1); else s.body.pop();
+        });
+        snapshots.push(snapshotState());
+      });
+    }
+
+    function render(){
+      gridContainer.querySelectorAll('.cell').forEach(c=>c.textContent='');
+      const state = snapshots[viewTurn] || snapshotState();
+      state.foods.forEach(f=>{gridContainer.children[f.y*width+f.x].textContent='🍎';});
+      state.snakes.forEach(s=>{const h=s.body[0];gridContainer.children[h.y*width+h.x].textContent=s.key;});
+      drawOverlay(state);
+    }
+
+    function drawOverlay(state){
+      const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);
+      // history up to viewTurn
+      ctx.globalAlpha=0.2;
+      history.slice(0,viewTurn).forEach(turn=>turn.forEach(m=>{
+        const x=m.x*(cellSize+1)+cellSize/2;
+        const y=m.y*(cellSize+1)+cellSize/2;
+        ctx.fillStyle=snakeColors[snakeLetters.indexOf(m.key)];
+        ctx.beginPath();ctx.arc(x,y,cellSize/6,0,2*Math.PI);ctx.fill();
+      }));
+      // planned moves only if viewing latest
+      if(viewTurn===history.length){
+        ctx.globalAlpha=0.5;
+        snakes.forEach(s=>{if(s.next){
+          const x=s.next.x*(cellSize+1)+cellSize/2;
+          const y=s.next.y*(cellSize+1)+cellSize/2;
+          ctx.fillStyle=s.color;ctx.beginPath();ctx.arc(x,y,cellSize/4,0,2*Math.PI);ctx.fill();
+        }});
+      }
+      // paths from state
+      ctx.globalAlpha=1;
+      state.snakes.forEach(s=>{if(s.body.length<2)return;
+        ctx.beginPath();ctx.strokeStyle=s.color;ctx.lineWidth=cellSize/3;ctx.lineJoin='round';
+        s.body.forEach((seg,i)=>{const x=seg.x*(cellSize+1)+cellSize/2;const y=seg.y*(cellSize+1)+cellSize/2;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+      });
+    }
+
+    function onCellClick(){
+      const x=+this.dataset.x,y=+this.dataset.y;
+      if(!selectedTool)return;
+      if(selectedTool.type==='erase'){
+        const fi=foods.findIndex(f=>f.x===x&&f.y===y);
+        if(fi>=0){foods.splice(fi,1);snapshots[0]=snapshotState(); render();return;}
+        for(let i=0;i<snakes.length;i++){const s=snakes[i];const bi=s.body.findIndex(b=>b.x===x&&b.y===y);
+          if(bi>=0){s.body.splice(bi,1);snapshots[0]=snapshotState();render();return;}}
+      } else if(selectedTool.type==='snake'){
+        const key=selectedTool.key;let sn=snakes.find(s=>s.key===key);
+        if(!sn){if(!snakes.some(s=>s.body.some(b=>b.x===x&&b.y===y)))snakes.push({id:snakes.length,body:[{x,y}],color:snakeColors[snakeLetters.indexOf(key)],key,next:null});}
+        else{const tail=sn.body[sn.body.length-1];if(Math.abs(tail.x-x)+Math.abs(tail.y-y)===1&&!snakes.some(s=>s.body.some(b=>b.x===x&&b.y===y))&&!foods.some(f=>f.x===x&&f.y===y))sn.body.push({x,y});}
+        snapshots[0]=snapshotState();
+      } else if(selectedTool.type==='food'){  
+        // add new food
+        if(!foods.some(f => f.x===x && f.y===y) && !snakes.some(s => s.body.some(b => b.x===x && b.y===y))) {
+          foods.push({ x, y });
+          // record into current snapshot (last tick)
+          const idx = viewTurn;
+          if (snapshots[idx]) snapshots[idx].foods.push({ x, y });
+        }
+      } else if(selectedTool.type==='plan'){
+        const sn=snakes.find(s=>s.body[0].x===x&&s.body[0].y===y);
+        if(sn)selectTool({type:'plan-move',snake:sn});
+      } else if(selectedTool.type==='plan-move'){
+        const sn=selectedTool.snake;const head=sn.body[0];if(Math.abs(head.x-x)+Math.abs(head.y-y)===1)sn.next={x,y};selectTool({type:'plan'});
+      }
+      render();updateToolbar();
+    }
+
+    function applyMoves(){
+      const turn = snakes.filter(s=>s.next).map(s=>({key:s.key,x:s.next.x,y:s.next.y}));
+      if(turn.length){
+        history.push(turn);
+      }
+      // Apply moves and implement delayed growth
+      snakes.forEach(s => {
+        if (s.next) {
+          // Move head
+          s.body.unshift({ x: s.next.x, y: s.next.y });
+          const fi = foods.findIndex(f => f.x === s.next.x && f.y === s.next.y);
+          if (fi >= 0) {
+            // Ate food: remove it and schedule growth next turn
+            foods.splice(fi, 1);
+            s.growNext = true;
+          } else {
+            if (s.growNext) {
+              // Growth turn: do not pop tail, clear flag
+              delete s.growNext;
+            } else {
+              // Normal move: remove tail
+              s.body.pop();
+            }
+          }
+          delete s.next;
+        }
+      });
+      // After applying moves, save snapshot
+      snapshots.push(snapshotState());
+      viewTurn = history.length;
+      historySlider.max = history.length;
+      historySlider.value = viewTurn;
+      sliderLabel.textContent = `Turn: ${viewTurn}`;
+      render();
+    }
+
+    // Initial
+    createBoard(false);
+  </script>
+</body>
+</html>
