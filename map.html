@@ -217,6 +217,19 @@
       snakes.forEach(s=>{
         if(!s.next&&s.lastDir){const nx=s.body[0].x+s.lastDir.dx,ny=s.body[0].y+s.lastDir.dy;if(nx>=0&&nx<width&&ny>=0&&ny<height)s.next={x:nx,y:ny};}
       });
+      // Resolve head-to-head collisions based on snake length
+      const headMap={};
+      snakes.forEach(s=>{if(s.next){const k=s.next.x+','+s.next.y;(headMap[k]=headMap[k]||[]).push(s);}});
+      const toRemove=new Set();
+      Object.values(headMap).forEach(list=>{
+        if(list.length>1){
+          const max=Math.max(...list.map(sn=>sn.body.length));
+          const winners=list.filter(sn=>sn.body.length===max);
+          if(winners.length===1){list.forEach(sn=>{if(sn!==winners[0])toRemove.add(sn);});}
+          else list.forEach(sn=>toRemove.add(sn));
+        }
+      });
+      if(toRemove.size>0)snakes=snakes.filter(s=>!toRemove.has(s));
       snakes.forEach(s=>{
         if(s.next){
           s.body.unshift({x:s.next.x,y:s.next.y});
