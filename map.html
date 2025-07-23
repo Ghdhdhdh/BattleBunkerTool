@@ -211,7 +211,8 @@
 
     function applyMoves(){
       const turn=snakes.filter(s=>s.next).map(s=>({key:s.key,x:s.next.x,y:s.next.y}));
-      if(turn.length)history.push(turn);
+      if(turn.length===0)return; // Don't proceed if no moves are planned
+      history.push(turn);
       const delayed=document.getElementById('delayedGrowthCheckbox').checked;
       snakes.forEach(s=>{
         if(!s.next&&s.lastDir){const nx=s.body[0].x+s.lastDir.dx,ny=s.body[0].y+s.lastDir.dy;if(nx>=0&&nx<width&&ny>=0&&ny<height)s.next={x:nx,y:ny};}
