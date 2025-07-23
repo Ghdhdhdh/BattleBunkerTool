@@ -27,6 +27,7 @@
     <button id="createBoard">Create Board</button>
   </div>
   <div id="toolbar">
+    <label><input type="checkbox" id="delayedGrowthCheckbox" checked/> Delayed Growth</label>
     <span>Place Snake A–L:</span>
     <span id="snakeButtons"></span>
     <button class="tool-button" id="foodButton" data-type="food">🍎 Food</button>
@@ -63,18 +64,18 @@
     const historySlider = document.getElementById('historySlider');
     const sliderLabel = document.getElementById('sliderLabel');
 
-    // Toolbar setup
+    // Setup toolbar buttons
     const snakeButtonsContainer = document.getElementById('snakeButtons');
     snakeLetters.forEach(key => {
       const btn = document.createElement('button');
-      btn.textContent = key; btn.className='tool-button';
-      btn.dataset.type='snake'; btn.dataset.key=key;
-      btn.addEventListener('click', _=>selectTool({type:'snake',key}));
+      btn.textContent = key;
+      btn.className = 'tool-button'; btn.dataset.type = 'snake'; btn.dataset.key = key;
+      btn.addEventListener('click', ()=>selectTool({type:'snake',key}));
       snakeButtonsContainer.appendChild(btn);
     });
-    document.getElementById('foodButton').addEventListener('click', _=>selectTool({type:'food'}));
-    document.getElementById('eraseButton').addEventListener('click', _=>selectTool({type:'erase'}));
-    document.getElementById('moveTool').addEventListener('click', _=>selectTool({type:'plan'}));
+    document.getElementById('foodButton').addEventListener('click', ()=>selectTool({type:'food'}));
+    document.getElementById('eraseButton').addEventListener('click', ()=>selectTool({type:'erase'}));
+    document.getElementById('moveTool').addEventListener('click', ()=>selectTool({type:'plan'}));
     document.getElementById('tickBtn').addEventListener('click', applyMoves);
 
     historySlider.addEventListener('input', ()=>{
@@ -85,49 +86,52 @@
 
     document.getElementById('createBoard').addEventListener('click', ()=>createBoard(false));
     document.getElementById('exportBtn').addEventListener('click', ()=>{
-      const data={width,height,snakes:snakes.map(s=>({body:s.body,key:s.key,color:s.color})),foods,history};
+      const data = { width, height, snakes:snakes.map(s=>({body:s.body,key:s.key,color:s.color})), foods, history };
       document.getElementById('exportData').value = JSON.stringify(data,null,2);
     });
     document.getElementById('importBtn').addEventListener('click', ()=>{
       try{
-        const data=JSON.parse(document.getElementById('importData').value);
+        const data = JSON.parse(document.getElementById('importData').value);
         width=data.width; height=data.height;
-        snakes=data.snakes.map((sn,i)=>({id:i,body:sn.body,color:sn.color,key:sn.key}));
+        snakes = data.snakes.map((sn,i)=>({id:i,body:sn.body,key:sn.key,color:sn.color,lastDir:null}));
         foods=data.foods||[]; history=data.history||[];
-        snapshots=[]; rebuildSnapshots();
+        snapshots=[]; createBoard(true);
+        history.forEach(turn=>applyHistoryTurn(turn));
         viewTurn=history.length;
-        historySlider.max=history.length;
-        historySlider.value=viewTurn;
+        historySlider.max=viewTurn; historySlider.value=viewTurn;
         sliderLabel.textContent=`Turn: ${viewTurn}`;
-        document.getElementById('width').value=width;
-        document.getElementById('height').value=height;
-        selectTool({type:'plan'});
-        createBoard(true);
-      }catch{alert('Invalid JSON');}
+      }catch(e){alert('Invalid JSON');}
     });
 
-    function selectTool(tool){selectedTool=tool;updateToolbar();}
+    function selectTool(tool){selectedTool=tool; updateToolbar();}
     function updateToolbar(){
       document.querySelectorAll('.tool-button').forEach(btn=>{
-        const type=btn.dataset.type; const key=btn.dataset.key;
-        btn.classList.toggle('active',selectedTool&&selectedTool.type===type&&(!key||selectedTool.key===key));
+        const type=btn.dataset.type, key=btn.dataset.key;
+        btn.classList.toggle('active', selectedTool && selectedTool.type===type && (!key||selectedTool.key===key));
       });
     }
 
     function createBoard(fromImport){
-      width=+document.getElementById('width').value;height=+document.getElementById('height').value;
-      if(!fromImport){snakes=[];foods=[];history=[];snapshots=[];viewTurn=0;historySlider.max=0;historySlider.value=0;sliderLabel.textContent='Turn: 0';selectTool({type:'plan'});}
+      width=+document.getElementById('width').value;
+      height=+document.getElementById('height').value;
+      if(!fromImport){ snakes=[]; foods=[]; history=[]; snapshots=[]; viewTurn=0;
+        historySlider.max=0; historySlider.value=0; sliderLabel.textContent='Turn: 0';
+        selectTool({type:'plan'});
+      }
       gridContainer.style.gridTemplateColumns=`repeat(${width},${cellSize}px)`;
       gridContainer.innerHTML='';
       for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-        const cell=document.createElement('div');cell.className='cell';cell.dataset.x=x;cell.dataset.y=y;
+        const cell=document.createElement('div'); cell.className='cell';
+        cell.dataset.x=x; cell.dataset.y=y;
         cell.addEventListener('click',onCellClick);
         gridContainer.appendChild(cell);
       }
       const W=width*cellSize+(width-1),H=height*cellSize+(height-1);
-      overlay.width=W;overlay.height=H;overlay.style.width=W+'px';overlay.style.height=H+'px';
-      gridContainer.style.width=W+'px';gridContainer.style.height=H+'px';
-      snapshots=[snapshotState()]; render();
+      overlay.width=W; overlay.height=H;
+      overlay.style.width=W+'px'; overlay.style.height=H+'px';
+      gridContainer.style.width=W+'px'; gridContainer.style.height=H+'px';
+      snapshots=[snapshotState()];
+      render();
     }
 
     function snapshotState(){
@@ -137,37 +141,28 @@
       };
     }
 
-    function rebuildSnapshots(){
-      snapshots=[snapshotState()];
-      // replay moves
-      const origSnakes = snakes.map(s=>({key:s.key,color:s.color}));
-      const origFoods = foods.map(f=>({x:f.x,y:f.y}));
-      // reset snakes and foods
-      snakes = origSnakes.map((s,i)=>({id:i,body:[...snapshots[0].snakes[i].body],color:s.color,key:s.key}));
-      foods=[...snapshots[0].foods];
-      history.forEach(turn=>{
-        // apply turn moves
-        turn.forEach(m=>{
-          const s=snakes.find(s=>s.key===m.key);
-          s.body.unshift({x:m.x,y:m.y});
-          const fi=foods.findIndex(f=>f.x===m.x&&f.y===m.y);
-          if(fi>=0)foods.splice(fi,1); else s.body.pop();
-        });
-        snapshots.push(snapshotState());
+    function applyHistoryTurn(turn){
+      turn.forEach(m=>{
+        const s=snakes.find(s=>s.key===m.key);
+        s.body.unshift({x:m.x,y:m.y});
+        const fi=foods.findIndex(f=>f.x===m.x && f.y===m.y);
+        if(fi>=0)foods.splice(fi,1); else s.body.pop();
       });
+      snapshots.push(snapshotState());
     }
 
     function render(){
       gridContainer.querySelectorAll('.cell').forEach(c=>c.textContent='');
-      const state = snapshots[viewTurn] || snapshotState();
-      state.foods.forEach(f=>{gridContainer.children[f.y*width+f.x].textContent='🍎';});
-      state.snakes.forEach(s=>{const h=s.body[0];gridContainer.children[h.y*width+h.x].textContent=s.key;});
+      const state=snapshots[viewTurn]||snapshotState();
+      state.foods.forEach(f=>gridContainer.children[f.y*width+f.x].textContent='🍎');
+      state.snakes.forEach(s=>{
+        const h=s.body[0];gridContainer.children[h.y*width+h.x].textContent=s.key;
+      });
       drawOverlay(state);
     }
 
     function drawOverlay(state){
       const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);
-      // history up to viewTurn
       ctx.globalAlpha=0.2;
       history.slice(0,viewTurn).forEach(turn=>turn.forEach(m=>{
         const x=m.x*(cellSize+1)+cellSize/2;
@@ -175,7 +170,6 @@
         ctx.fillStyle=snakeColors[snakeLetters.indexOf(m.key)];
         ctx.beginPath();ctx.arc(x,y,cellSize/6,0,2*Math.PI);ctx.fill();
       }));
-      // planned moves only if viewing latest
       if(viewTurn===history.length){
         ctx.globalAlpha=0.5;
         snakes.forEach(s=>{if(s.next){
@@ -184,12 +178,12 @@
           ctx.fillStyle=s.color;ctx.beginPath();ctx.arc(x,y,cellSize/4,0,2*Math.PI);ctx.fill();
         }});
       }
-      // paths from state
       ctx.globalAlpha=1;
-      state.snakes.forEach(s=>{if(s.body.length<2)return;
+      state.snakes.forEach(s=>{if(s.body.length>1){
         ctx.beginPath();ctx.strokeStyle=s.color;ctx.lineWidth=cellSize/3;ctx.lineJoin='round';
-        s.body.forEach((seg,i)=>{const x=seg.x*(cellSize+1)+cellSize/2;const y=seg.y*(cellSize+1)+cellSize/2;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
-      });
+        s.body.forEach((seg,i)=>{const x=seg.x*(cellSize+1)+cellSize/2;const y=seg.y*(cellSize+1)+cellSize/2;i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+        ctx.stroke();
+      }});
     }
 
     function onCellClick(){
@@ -197,64 +191,41 @@
       if(!selectedTool)return;
       if(selectedTool.type==='erase'){
         const fi=foods.findIndex(f=>f.x===x&&f.y===y);
-        if(fi>=0){foods.splice(fi,1);snapshots[0]=snapshotState(); render();return;}
+        if(fi>=0){foods.splice(fi,1);snapshots[0]=snapshotState();render();return;}
         for(let i=0;i<snakes.length;i++){const s=snakes[i];const bi=s.body.findIndex(b=>b.x===x&&b.y===y);
           if(bi>=0){s.body.splice(bi,1);snapshots[0]=snapshotState();render();return;}}
-      } else if(selectedTool.type==='snake'){
+      }else if(selectedTool.type==='snake'){
         const key=selectedTool.key;let sn=snakes.find(s=>s.key===key);
-        if(!sn){if(!snakes.some(s=>s.body.some(b=>b.x===x&&b.y===y)))snakes.push({id:snakes.length,body:[{x,y}],color:snakeColors[snakeLetters.indexOf(key)],key,next:null});}
+        if(!sn){if(!snakes.some(s=>s.body.some(b=>b.x===x&&b.y===y)))snakes.push({id:snakes.length,body:[{x,y}],key,color:snakeColors[snakeLetters.indexOf(key)],lastDir:null});}
         else{const tail=sn.body[sn.body.length-1];if(Math.abs(tail.x-x)+Math.abs(tail.y-y)===1&&!snakes.some(s=>s.body.some(b=>b.x===x&&b.y===y))&&!foods.some(f=>f.x===x&&f.y===y))sn.body.push({x,y});}
         snapshots[0]=snapshotState();
-      } else if(selectedTool.type==='food'){  
-        // add new food
-        if(!foods.some(f => f.x===x && f.y===y) && !snakes.some(s => s.body.some(b => b.x===x && b.y===y))) {
-          foods.push({ x, y });
-          // record into current snapshot (last tick)
-          const idx = viewTurn;
-          if (snapshots[idx]) snapshots[idx].foods.push({ x, y });
-        }
-      } else if(selectedTool.type==='plan'){
-        const sn=snakes.find(s=>s.body[0].x===x&&s.body[0].y===y);
-        if(sn)selectTool({type:'plan-move',snake:sn});
-      } else if(selectedTool.type==='plan-move'){
-        const sn=selectedTool.snake;const head=sn.body[0];if(Math.abs(head.x-x)+Math.abs(head.y-y)===1)sn.next={x,y};selectTool({type:'plan'});
+      }else if(selectedTool.type==='food'){
+        if(!foods.some(f=>f.x===x&&f.y===y)&&!snakes.some(s=>s.body.some(b=>b.x===x&&b.y===y))){foods.push({x,y});const idx=viewTurn;if(snapshots[idx])snapshots[idx].foods.push({x,y});}
+      }else if(selectedTool.type==='plan'){
+        const sn=snakes.find(s=>s.body[0].x===x&&s.body[0].y===y);if(sn)selectTool({type:'plan-move',snake:sn});
+      }else if(selectedTool.type==='plan-move'){
+        const sn=selectedTool.snake;const head=sn.body[0];if(Math.abs(head.x-x)+Math.abs(head.y-y)===1){sn.next={x,y};sn.lastDir={dx:x-head.x,dy:y-head.y};}selectTool({type:'plan'});
       }
       render();updateToolbar();
     }
 
     function applyMoves(){
-      const turn = snakes.filter(s=>s.next).map(s=>({key:s.key,x:s.next.x,y:s.next.y}));
-      if(turn.length){
-        history.push(turn);
-      }
-      // Apply moves and implement delayed growth
-      snakes.forEach(s => {
-        if (s.next) {
-          // Move head
-          s.body.unshift({ x: s.next.x, y: s.next.y });
-          const fi = foods.findIndex(f => f.x === s.next.x && f.y === s.next.y);
-          if (fi >= 0) {
-            // Ate food: remove it and schedule growth next turn
-            foods.splice(fi, 1);
-            s.growNext = true;
-          } else {
-            if (s.growNext) {
-              // Growth turn: do not pop tail, clear flag
-              delete s.growNext;
-            } else {
-              // Normal move: remove tail
-              s.body.pop();
-            }
-          }
+      const turn=snakes.filter(s=>s.next).map(s=>({key:s.key,x:s.next.x,y:s.next.y}));
+      if(turn.length)history.push(turn);
+      const delayed=document.getElementById('delayedGrowthCheckbox').checked;
+      snakes.forEach(s=>{
+        if(!s.next&&s.lastDir){const nx=s.body[0].x+s.lastDir.dx,ny=s.body[0].y+s.lastDir.dy;if(nx>=0&&nx<width&&ny>=0&&ny<height)s.next={x:nx,y:ny};}
+      });
+      snakes.forEach(s=>{
+        if(s.next){
+          s.body.unshift({x:s.next.x,y:s.next.y});
+          const fi=foods.findIndex(f=>f.x===s.next.x&&f.y===s.next.y);
+          if(fi>=0){foods.splice(fi,1);if(delayed){s.growNext=true;s.body.pop();}else delete s.growNext;}else if(delayed&&s.growNext){delete s.growNext;}else s.body.pop();
           delete s.next;
         }
       });
-      // After applying moves, save snapshot
       snapshots.push(snapshotState());
-      viewTurn = history.length;
-      historySlider.max = history.length;
-      historySlider.value = viewTurn;
-      sliderLabel.textContent = `Turn: ${viewTurn}`;
+      viewTurn=history.length;historySlider.max=viewTurn;historySlider.value=viewTurn;sliderLabel.textContent=`Turn: ${viewTurn}`;
       render();
     }
 
