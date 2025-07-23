@@ -229,6 +229,22 @@
           else list.forEach(sn=>toRemove.add(sn));
         }
       });
+      // Check for snakes moving into each other's previous heads
+      for(let i=0;i<snakes.length;i++){
+        const a=snakes[i];
+        if(!a.next) continue;
+        for(let j=i+1;j<snakes.length;j++){
+          const b=snakes[j];
+          if(!b.next) continue;
+          const aHead=a.body[0], bHead=b.body[0];
+          if(a.next.x===bHead.x && a.next.y===bHead.y &&
+             b.next.x===aHead.x && b.next.y===aHead.y){
+            if(a.body.length>b.body.length) toRemove.add(b);
+            else if(b.body.length>a.body.length) toRemove.add(a);
+            else{toRemove.add(a); toRemove.add(b);} 
+          }
+        }
+      }
       if(toRemove.size>0)snakes=snakes.filter(s=>!toRemove.has(s));
       snakes.forEach(s=>{
         if(s.next){
