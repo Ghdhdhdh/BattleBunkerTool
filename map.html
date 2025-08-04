@@ -56,6 +56,10 @@
     <textarea id="importData" rows="5" placeholder="Paste JSON here"></textarea><br/>
     <button id="importBtn">Import JSON</button>
   </div>
+  <div style="margin-top:20px;">
+    <h3>Network Log</h3>
+    <pre id="networkLog" style="max-height:150px;overflow:auto;background:#f8f8f8;border:1px solid #ccc;padding:10px;"></pre>
+  </div>
   <script>
     let width, height;
     let snakes = [], foods = [], history = [], snapshots = [];
@@ -71,6 +75,26 @@
     const sliderLabel = document.getElementById('sliderLabel');
     const urlSelect = document.getElementById('urlSnakeSelect');
     const urlInput = document.getElementById('snakeUrlInput');
+    const networkLog = document.getElementById('networkLog');
+
+    function logNetwork(...args){
+      const line = args.map(a=>typeof a==='string'?a:JSON.stringify(a)).join(' ');
+      networkLog.textContent += line+'\n';
+      networkLog.scrollTop = networkLog.scrollHeight;
+      console.log(...args);
+    }
+
+    const originalFetch = window.fetch;
+    window.fetch = function(resource, options){
+      logNetwork('Request:', resource, options||{});
+      return originalFetch(resource, options).then(res=>{
+        logNetwork('Response:', res.status, res.statusText, 'from', resource);
+        return res;
+      }).catch(err=>{
+        logNetwork('Error:', err, 'from', resource);
+        throw err;
+      });
+    };
 
     // Setup toolbar buttons
     const snakeButtonsContainer = document.getElementById('snakeButtons');
@@ -168,7 +192,8 @@
         you:{id:sn.key,name:sn.key,health:100,body:sn.body}
       };
       fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(state)})
-        .then(r=>r.json()).then(res=>{
+        .then(r=>{if(!r.ok) throw new Error('HTTP '+r.status); return r.json();})
+        .then(res=>{
           const dir=res.move;
           const dirs={up:{x:0,y:-1},down:{x:0,y:1},left:{x:-1,y:0},right:{x:1,y:0}};
           if(dirs[dir]){
@@ -179,7 +204,10 @@
             render();
             updateToolbar();
           }
-        }).catch(()=>alert('Fetch failed for '+key));
+        }).catch(err=>{
+          logNetwork('Fetch failed for', key, err);
+          alert('Fetch failed for '+key);
+        });
     }
 
     function createBoard(fromImport){
