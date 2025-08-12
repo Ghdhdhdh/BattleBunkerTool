@@ -324,9 +324,9 @@
       console.log(url)
 
       // Ensure URL is absolute
-      const absoluteUrl = url.startsWith('http') ? url : 'http://' + url;
-      
-      fetch(absoluteUrl + "/move", {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(moveRequest)})
+      // const absoluteUrl = url.startsWith('https') ? url : 'https://' + url;
+      const absoluteUrl = url;
+      fetch('proxy/' + absoluteUrl + "/move", {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(moveRequest)})
         .then(r => {if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();})
         .then(res => {
           const dir = res.move;
