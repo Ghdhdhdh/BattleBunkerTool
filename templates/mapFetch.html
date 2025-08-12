@@ -323,7 +323,10 @@
       // const corsProxy = "https://d9cc91cf-5082-4576-a276-00202e41ff52-00-2ra6hhxkyietw.picard.replit.dev/post?"
       console.log(url)
 
-      fetch(url + "/move", {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(moveRequest)})
+      // Ensure URL is absolute
+      const absoluteUrl = url.startsWith('http') ? url : 'http://' + url;
+      
+      fetch(absoluteUrl + "/move", {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(moveRequest)})
         .then(r => {if (!r.ok) throw new Error('HTTP ' + r.status); return r.json();})
         .then(res => {
           const dir = res.move;
